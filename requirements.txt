@@ -1,0 +1,10 @@
+streamlit
+pdfplumber
+pytesseract
+pdf2image
+Pillow
+rapidfuzz
+requests
+pandas
+openpyxl
+groq
