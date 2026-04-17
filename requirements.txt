@@ -8,4 +8,5 @@ requests
 pandas
 openpyxl
 groq
+fitz
 easyocr
