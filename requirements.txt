@@ -8,5 +8,11 @@ requests
 pandas
 openpyxl
 groq
-fitz
-easyocr
+groq
+requests
+pandas
+rapidfuzz
+numpy
+pymupdf
+pytesseract
+Pillow
