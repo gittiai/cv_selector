@@ -1,6 +1,5 @@
 streamlit
 pdfplumber
-pytesseract
 pdf2image
 Pillow
 rapidfuzz
@@ -8,11 +7,9 @@ requests
 pandas
 openpyxl
 groq
-groq
 requests
 pandas
 rapidfuzz
 numpy
 pymupdf
-pytesseract
 Pillow
