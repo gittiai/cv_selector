@@ -131,7 +131,7 @@ REASON: your reason here"""
 
     return decision, reason
 
-def run_pipeline(pdf_paths, iit_json_path="/Users/adityashivhare/Downloads/AI430/5_sem_task/iit_names.json", progress_callback=None):
+def run_pipeline(pdf_paths, iit_json_path="iit_names.json", progress_callback=None):
     iit_names = load_iit_names(iit_json_path)
     selected = []
     rejected = []
