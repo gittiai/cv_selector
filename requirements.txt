@@ -1,8 +1,8 @@
-streamlit
-groq
-google-generativeai
-pymupdf
-pillow
-pandas
-requests
-rapidfuzz
+streamlit>=1.32.0
+groq>=0.9.0
+google-generativeai>=0.7.0
+PyMuPDF>=1.24.0
+Pillow>=10.0.0
+pandas>=2.0.0
+requests>=2.31.0
+rapidfuzz>=3.6.0
