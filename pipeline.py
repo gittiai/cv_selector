@@ -1,99 +1,70 @@
-import json
 import time
 import requests
 import pandas as pd
 from rapidfuzz import fuzz
 from groq import Groq
+import google.generativeai as genai
 import os
-import numpy as np
 import fitz
-import pytesseract
 from PIL import Image
 
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+gemini_model = genai.GenerativeModel("gemini-2.5-flash")
 
-def extract_education_section_from_page1(pdf_path):
+
+def pdf_page_to_image(pdf_path, page_index=0, dpi=200):
     doc = fitz.open(str(pdf_path))
-    page = doc[0]
-    mat = fitz.Matrix(3.0, 3.0)
-    pix = page.get_pixmap(matrix=mat)
+    page = doc[page_index]
+    mat = fitz.Matrix(dpi / 72, dpi / 72)
+    pix = page.get_pixmap(matrix=mat, alpha=False)
     doc.close()
-
-    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-    full_text = pytesseract.image_to_string(img)
-
-    start_markers = ["particulars of educational qualification", "educational qualification", "academic qualification"]
-    end_markers = ["titles pg", "titles ph", "experience", "research experience", "teaching experience", "declaration"]
-
-    lower_text = full_text.lower()
-    start_idx = -1
-    for marker in start_markers:
-        idx = lower_text.find(marker)
-        if idx != -1:
-            start_idx = idx
-            break
-
-    if start_idx == -1:
-        return full_text
-
-    end_idx = len(full_text)
-    for marker in end_markers:
-        idx = lower_text.find(marker, start_idx + 10)
-        if idx != -1 and idx < end_idx:
-            end_idx = idx
-
-    return full_text[start_idx:end_idx]
+    return Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
 
-def extract_full_text_from_pdf(pdf_path):
-    doc = fitz.open(str(pdf_path))
-    page = doc[0]
-    mat = fitz.Matrix(3.0, 3.0)
-    pix = page.get_pixmap(matrix=mat)
-    doc.close()
-
-    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-    return pytesseract.image_to_string(img)
-
-
-def extract_candidate_name(resume_text):
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        max_tokens=200,
-        messages=[{
-            "role": "user",
-            "content": f"Extract only the full name of the candidate from this resume. Return just the name, nothing else.\n\n{resume_text[:2000]}"
-        }]
+def gemini_extract_name(image):
+    prompt = (
+        "Look at this resume image. "
+        "Extract ONLY the full name of the candidate. "
+        "Return just the name with no extra text or punctuation."
     )
-    return response.choices[0].message.content.strip()
+    response = gemini_model.generate_content([prompt, image], stream=False)
+    return response.text.strip()
 
 
-def verify_college_with_llm(education_block):
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        max_tokens=200,
-        messages=[{
-            "role": "user",
-            "content": f"""From the education section below, identify if the candidate has studied at any IIT (Indian Institute of Technology) or NIT (National Institute of Technology).
+def gemini_extract_education(image):
+    prompt = (
+        "Look at this resume image. "
+        "Find and return ONLY the section about educational qualifications "
+        "(degrees, universities, institutes, years). "
+        "Include every line from that section verbatim. "
+        "Do not add commentary or headings — just the raw text from that section."
+    )
+    response = gemini_model.generate_content([prompt, image], stream=False)
+    return response.text.strip()
 
-Respond in this exact format:
+
+def gemini_check_iit_nit(education_text):
+    prompt = f"""From the education section below, identify if the candidate has studied 
+at any IIT (Indian Institute of Technology) or NIT (National Institute of Technology).
+
+Respond in EXACTLY this format (two lines, nothing else):
 FOUND: YES or NO
 COLLEGE: the exact college name as written in the text, or NONE
 
 Education Section:
-{education_block}"""
-        }]
-    )
+{education_text}"""
 
-    result = response.choices[0].message.content.strip()
+    response = gemini_model.generate_content(prompt, stream=False)
+    result = response.text.strip()
+
     found = False
     college_name = None
-
-    for line in result.split("\n"):
-        if line.startswith("FOUND:"):
+    for line in result.splitlines():
+        if line.upper().startswith("FOUND:"):
             found = "YES" in line.upper()
-        if line.startswith("COLLEGE:") and "NONE" not in line.upper():
-            college_name = line.replace("COLLEGE:", "").strip()
+        if line.upper().startswith("COLLEGE:") and "NONE" not in line.upper():
+            college_name = line.split(":", 1)[1].strip()
 
     return found, college_name
 
@@ -121,17 +92,17 @@ def fetch_q1_papers(author_name):
             "VLDB", "ICDE", "Lancet", "NEJM", "JAMA", "Nature Medicine",
             "Nature Communications", "Advanced Materials", "Angewandte Chemie",
             "Physical Review Letters", "Journal of the American Chemical Society",
-            "Bioinformatics", "Nucleic Acids Research", "PNAS"
+            "Bioinformatics", "Nucleic Acids Research", "PNAS",
         ]
 
         q1_papers = []
         for paper in papers_data.get("data", []):
             venue = paper.get("venue", "")
-            if any(fuzz.partial_ratio(q1.lower(), venue.lower()) > 80 for q1 in q1_venues):
+            if any(fuzz.partial_ratio(q.lower(), venue.lower()) > 80 for q in q1_venues):
                 q1_papers.append({
                     "title": paper.get("title", ""),
                     "venue": venue,
-                    "year": paper.get("year", "")
+                    "year": paper.get("year", ""),
                 })
 
         return len(q1_papers), q1_papers
@@ -141,16 +112,17 @@ def fetch_q1_papers(author_name):
 
 
 def analyze_candidate_with_llm(candidate_name, college_found, college_name, q1_count, q1_papers):
-    papers_text = "\n".join(
-        [f"- {p['title']} ({p['venue']}, {p['year']})" for p in q1_papers[:5]]
-    ) if q1_papers else "None found"
-
+    papers_text = (
+        "\n".join(f"- {p['title']} ({p['venue']}, {p['year']})" for p in q1_papers[:5])
+        if q1_papers
+        else "None found"
+    )
     decision = "SELECTED" if college_found else "REJECTED"
 
     prompt = f"""You are evaluating a PhD candidate for a research position.
 
 Candidate: {candidate_name}
-College in approved list (from education section only): {"Yes - " + college_name if college_found else "No"}
+College in approved list (IIT/NIT): {"Yes — " + college_name if college_found else "No"}
 Q1 Research Papers Count: {q1_count}
 Q1 Papers:
 {papers_text}
@@ -160,19 +132,19 @@ appears in the approved list under their educational qualifications.
 Write a clear 1-sentence reason reflecting this decision.
 Do NOT mention Q1 paper count as a selection/rejection criterion.
 
-Respond in this exact format:
+Respond in EXACTLY this format:
 DECISION: {decision}
 REASON: your reason here"""
 
-    response = client.chat.completions.create(
+    response = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         max_tokens=300,
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": prompt}],
     )
 
     result_text = response.choices[0].message.content.strip()
     reason = "Does not meet criteria."
-    for line in result_text.split("\n"):
+    for line in result_text.splitlines():
         if line.startswith("REASON:"):
             reason = line.replace("REASON:", "").strip()
             break
@@ -185,18 +157,15 @@ def run_pipeline(pdf_paths, progress_callback=None):
     rejected = []
 
     for i, pdf_path in enumerate(pdf_paths):
+        label = pdf_path.name if hasattr(pdf_path, "name") else str(pdf_path)
         if progress_callback:
-            progress_callback(
-                f"Processing: {pdf_path.name if hasattr(pdf_path, 'name') else pdf_path}",
-                i,
-                len(pdf_paths)
-            )
+            progress_callback(f"Processing: {label}", i, len(pdf_paths))
 
         try:
-            education_block = extract_education_section_from_page1(pdf_path)
-            page1_text = extract_full_text_from_pdf(pdf_path)
-            candidate_name = extract_candidate_name(page1_text)
-            college_found, college_name = verify_college_with_llm(education_block)
+            page_image = pdf_page_to_image(pdf_path, page_index=0, dpi=200)
+            candidate_name = gemini_extract_name(page_image)
+            education_text = gemini_extract_education(page_image)
+            college_found, college_name = gemini_check_iit_nit(education_text)
             q1_count, q1_papers = fetch_q1_papers(candidate_name)
             time.sleep(1)
             decision, reason = analyze_candidate_with_llm(
@@ -210,12 +179,11 @@ def run_pipeline(pdf_paths, progress_callback=None):
                 "Decision": decision,
                 "Reason": reason,
             }
-
             (selected if decision == "SELECTED" else rejected).append(record)
 
         except Exception as e:
             rejected.append({
-                "Candidate Name": str(pdf_path),
+                "Candidate Name": label,
                 "College Found": "Error",
                 "Q1 Papers Count": 0,
                 "Decision": "REJECTED",
