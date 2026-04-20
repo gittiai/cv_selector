@@ -5,10 +5,15 @@ import pandas as pd
 from pathlib import Path
 from pipeline_gemini import run_pipeline
 
+groq_key = st.secrets.get("GROQ_API_KEY", "")
+gemini_key = st.secrets.get("GEMINI_API_KEY", "")
+
 st.title("PhD Candidate Screener")
 
-groq_key = st.text_input("Groq API Key", type="password")
-gemini_key = st.text_input("Gemini API Key", type="password")
+if not groq_key:
+    groq_key = st.text_input("Groq API Key", type="password")
+if not gemini_key:
+    gemini_key = st.text_input("Gemini API Key", type="password")
 
 if groq_key:
     os.environ["GROQ_API_KEY"] = groq_key
