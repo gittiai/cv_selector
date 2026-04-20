@@ -3,36 +3,54 @@ import requests
 import pandas as pd
 from rapidfuzz import fuzz
 from groq import Groq
-import google.generativeai as genai
 import os
 import fitz
 from PIL import Image
+import base64
+import io
 
 groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-gemini_model = genai.GenerativeModel("gemini-2.5-flash")
+VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+TEXT_MODEL = "llama-3.3-70b-versatile"
 
 
-def pdf_page_to_image(pdf_path, page_index=0, dpi=200):
+def pdf_page_to_base64(pdf_path, page_index=0, dpi=200):
     doc = fitz.open(str(pdf_path))
     page = doc[page_index]
     mat = fitz.Matrix(dpi / 72, dpi / 72)
     pix = page.get_pixmap(matrix=mat, alpha=False)
     doc.close()
-    return Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    buffer = io.BytesIO()
+    img.save(buffer, format="JPEG")
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 
-def gemini_extract_name(image):
+def groq_vision_call(base64_image, prompt):
+    response = groq_client.chat.completions.create(
+        model=VISION_MODEL,
+        max_tokens=500,
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
+                {"type": "text", "text": prompt}
+            ]
+        }]
+    )
+    return response.choices[0].message.content.strip()
+
+
+def extract_name(base64_image):
     prompt = (
         "Look at this resume image. "
         "Extract ONLY the full name of the candidate. "
         "Return just the name with no extra text or punctuation."
     )
-    response = gemini_model.generate_content([prompt, image], stream=False)
-    return response.text.strip()
+    return groq_vision_call(base64_image, prompt)
 
 
-def gemini_extract_education(image):
+def extract_education(base64_image):
     prompt = (
         "Look at this resume image. "
         "Find and return ONLY the section about educational qualifications "
@@ -40,11 +58,10 @@ def gemini_extract_education(image):
         "Include every line from that section verbatim. "
         "Do not add commentary or headings — just the raw text from that section."
     )
-    response = gemini_model.generate_content([prompt, image], stream=False)
-    return response.text.strip()
+    return groq_vision_call(base64_image, prompt)
 
 
-def gemini_check_iit_nit(education_text):
+def check_iit_nit(education_text):
     prompt = f"""From the education section below, identify if the candidate has studied 
 at any IIT (Indian Institute of Technology) or NIT (National Institute of Technology).
 
@@ -55,8 +72,12 @@ COLLEGE: the exact college name as written in the text, or NONE
 Education Section:
 {education_text}"""
 
-    response = gemini_model.generate_content(prompt, stream=False)
-    result = response.text.strip()
+    response = groq_client.chat.completions.create(
+        model=TEXT_MODEL,
+        max_tokens=100,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    result = response.choices[0].message.content.strip()
 
     found = False
     college_name = None
@@ -137,7 +158,7 @@ DECISION: {decision}
 REASON: your reason here"""
 
     response = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model=TEXT_MODEL,
         max_tokens=300,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -162,10 +183,10 @@ def run_pipeline(pdf_paths, progress_callback=None):
             progress_callback(f"Processing: {label}", i, len(pdf_paths))
 
         try:
-            page_image = pdf_page_to_image(pdf_path, page_index=0, dpi=200)
-            candidate_name = gemini_extract_name(page_image)
-            education_text = gemini_extract_education(page_image)
-            college_found, college_name = gemini_check_iit_nit(education_text)
+            base64_image = pdf_page_to_base64(pdf_path, page_index=0, dpi=200)
+            candidate_name = extract_name(base64_image)
+            education_text = extract_education(base64_image)
+            college_found, college_name = check_iit_nit(education_text)
             q1_count, q1_papers = fetch_q1_papers(candidate_name)
             time.sleep(1)
             decision, reason = analyze_candidate_with_llm(
