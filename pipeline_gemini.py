@@ -90,17 +90,37 @@ Education Section:
     return found, college_name
 
 
+def clean_name(name):
+    prefixes = ["dr", "mr", "mrs", "ms", "prof", "professor", "phd", "ph.d"]
+    parts = name.strip().split()
+    parts = [p for p in parts if p.lower().strip(".,") not in prefixes]
+    return " ".join(parts)
+
+
 def fetch_q1_papers(author_name):
     try:
+        author_name = clean_name(author_name)
+
         search_url = "https://api.semanticscholar.org/graph/v1/author/search"
-        params = {"query": author_name, "fields": "authorId,name,paperCount", "limit": 1}
+        params = {"query": author_name, "fields": "authorId,name,paperCount", "limit": 5}
         resp = requests.get(search_url, params=params, timeout=10)
         data = resp.json()
 
         if not data.get("data"):
             return 0, []
 
-        author_id = data["data"][0]["authorId"]
+        best_match = None
+        best_score = 0
+        for candidate in data["data"]:
+            score = fuzz.token_sort_ratio(author_name.lower(), candidate["name"].lower())
+            if score > best_score:
+                best_score = score
+                best_match = candidate
+
+        if not best_match or best_score < 60:
+            return 0, []
+
+        author_id = best_match["authorId"]
         papers_url = f"https://api.semanticscholar.org/graph/v1/author/{author_id}/papers"
         paper_params = {"fields": "title,venue,year,externalIds", "limit": 50}
         papers_resp = requests.get(papers_url, params=paper_params, timeout=10)
