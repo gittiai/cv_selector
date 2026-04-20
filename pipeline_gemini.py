@@ -90,6 +90,18 @@ Education Section:
     return found, college_name
 
 
+def is_q1_journal(journal_name):
+    if not journal_name or len(journal_name.strip()) < 3:
+        return False
+    try:
+        url = f"https://www.scimagojr.com/journalsearch.php?q={requests.utils.quote(journal_name)}&tip=title&clean=0"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = requests.get(url, headers=headers, timeout=10)
+        return "Q1" in resp.text
+    except Exception:
+        return False
+
+
 def clean_name(name):
     prefixes = ["dr", "mr", "mrs", "ms", "prof", "professor", "phd", "ph.d"]
     parts = name.strip().split()
@@ -126,25 +138,16 @@ def fetch_q1_papers(author_name):
         papers_resp = requests.get(papers_url, params=paper_params, timeout=10)
         papers_data = papers_resp.json()
 
-        q1_venues = [
-            "Nature", "Science", "Cell", "IEEE Transactions", "ACM",
-            "NeurIPS", "ICML", "ICLR", "CVPR", "ECCV", "ICCV", "ACL",
-            "EMNLP", "NAACL", "AAAI", "IJCAI", "KDD", "WWW", "SIGMOD",
-            "VLDB", "ICDE", "Lancet", "NEJM", "JAMA", "Nature Medicine",
-            "Nature Communications", "Advanced Materials", "Angewandte Chemie",
-            "Physical Review Letters", "Journal of the American Chemical Society",
-            "Bioinformatics", "Nucleic Acids Research", "PNAS",
-        ]
-
         q1_papers = []
         for paper in papers_data.get("data", []):
             venue = paper.get("venue", "")
-            if any(fuzz.partial_ratio(q.lower(), venue.lower()) > 80 for q in q1_venues):
+            if venue and is_q1_journal(venue):
                 q1_papers.append({
                     "title": paper.get("title", ""),
                     "venue": venue,
                     "year": paper.get("year", ""),
                 })
+            time.sleep(0.5)
 
         return len(q1_papers), q1_papers
 
