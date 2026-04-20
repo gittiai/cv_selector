@@ -40,29 +40,24 @@ def extract_resume_info(base64_image):
 def is_q1_journal(journal_name):
     if not journal_name or len(journal_name) < 3:
         return False
-    try:
-        url = f"https://www.scimagojr.com/journalsearch.php?q={requests.utils.quote(journal_name)}&tip=title&clean=0"
-        resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
-        return "Q1" in resp.text
-    except Exception:
-        return False
+    
+    url = f"https://www.scimagojr.com/journalsearch.php?q={requests.utils.quote(journal_name)}&tip=title&clean=0"
+    resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+    return "Q1" in resp.text
 
 def fetch_q1_papers(author_name):
-    try:
-        clean_name = author_name.lower().replace("dr.", "").replace("prof.", "").strip()
-        
-        url = f"https://api.semanticscholar.org/graph/v1/author/search?query={clean_name}&fields=papers.venue&limit=1"
-        res = requests.get(url, timeout=5).json()
+    clean_name = author_name.lower().replace("dr.", "").replace("prof.", "").strip()
+    
+    url = f"https://api.semanticscholar.org/graph/v1/author/search?query={clean_name}&fields=papers.venue&limit=1"
+    res = requests.get(url, timeout=5).json()
 
-        if not res.get("data"):
-            return 0
-
-        papers = res["data"][0].get("papers", [])
-        q1_count = sum(1 for p in papers if is_q1_journal(p.get("venue")))
-        
-        return q1_count
-    except Exception:
+    if not res.get("data"):
         return 0
+
+    papers = res["data"][0].get("papers", [])
+    q1_count = sum(1 for p in papers if is_q1_journal(p.get("venue")))
+    
+    return q1_count
 
 def run_pipeline(pdf_paths, progress_callback=None):
     results = []
