@@ -44,19 +44,9 @@ if st.button("Run Pipeline") and uploaded_files:
         selected_df, rejected_df = run_pipeline(tmp_paths, progress_callback=update_progress)
         status.text("Done!")
 
-        st.subheader("Selected")
-        if not selected_df.empty:
-            st.dataframe(selected_df, use_container_width=True, hide_index=True)
-            st.download_button("Download Selected CSV", selected_df.to_csv(index=False), "selected.csv", "text/csv")
-        else:
-            st.write("No candidates selected.")
-
-        st.subheader("Rejected")
-        if not rejected_df.empty:
-            st.dataframe(rejected_df, use_container_width=True, hide_index=True)
-            st.download_button("Download Rejected CSV", rejected_df.to_csv(index=False), "rejected.csv", "text/csv")
-        else:
-            st.write("No candidates rejected.")
+        df = pd.concat([selected_df, rejected_df], ignore_index=True)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.download_button("Download CSV", df.to_csv(index=False), "results.csv", "text/csv")
 
         for p in tmp_paths:
             try:
